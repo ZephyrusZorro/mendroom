@@ -1,16 +1,69 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ArrowDownToLine, ArrowRight, ArrowUpRight, BookOpen, CalendarDays, Check, CheckCircle2, ChevronDown, ChevronRight, CircleHelp, Clock3, Coffee, FolderHeart, HeartHandshake, Leaf, MapPin, Plus, RefreshCw, Search, ShieldCheck, Sprout, Users, Wrench, X } from 'lucide-react';
-import { categoryLabels, statusLabels, type Session, type SessionData, type SessionSummary, type Status, type Ticket } from '../shared/model.ts';
+import {
+  ArrowDownToLine,
+  ArrowRight,
+  ArrowUpRight,
+  BookOpen,
+  CalendarDays,
+  Check,
+  CheckCircle2,
+  ChevronDown,
+  ChevronRight,
+  CircleHelp,
+  Clock3,
+  Coffee,
+  FolderHeart,
+  HeartHandshake,
+  Leaf,
+  MapPin,
+  Plus,
+  RefreshCw,
+  Search,
+  ShieldCheck,
+  Sprout,
+  Users,
+  Wrench,
+  X,
+} from 'lucide-react';
+import {
+  categoryLabels,
+  type Session,
+  type SessionData,
+  type SessionSummary,
+  type Status,
+  type Ticket,
+} from '../shared/model.ts';
 import { request } from './api.ts';
-import { Button, CategoryIcon, EmptyState, FormError, Modal, StatusBadge, TextLink, TicketNumber } from './components.tsx';
+import {
+  Button,
+  CategoryIcon,
+  EmptyState,
+  FormError,
+  Modal,
+  StatusBadge,
+  TextLink,
+  TicketNumber,
+} from './components.tsx';
 import { IntakeForm, SessionForm, VolunteerForm } from './forms.tsx';
 import { RepairDetails } from './RepairDetails.tsx';
 import { DataTools } from './DataTools.tsx';
+import { loadWorkspace } from './workspace.ts';
 
 type View = 'workbench' | 'volunteers' | 'journal';
 type Dialog = 'session' | 'intake' | 'volunteer' | 'about' | 'data' | null;
-const remembered = () => { try { return localStorage.getItem('mendroom.session.v1') || ''; } catch { return ''; } };
-const niceDate = (date: string) => new Date(`${date}T12:00:00`).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'long' });
+const remembered = () => {
+  try {
+    return localStorage.getItem('mendroom.session.v1') || '';
+  } catch {
+    return '';
+  }
+};
+const niceDate = (date: string) =>
+  new Date(`${date}T12:00:00`).toLocaleDateString(undefined, {
+    weekday: 'short',
+    day: 'numeric',
+    month: 'long',
+  });
 
 export function App() {
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
@@ -33,101 +86,1121 @@ export function App() {
   const refresh = useCallback(async (id: string) => {
     const seq = ++sequence.current;
     try {
-      const [list, details] = await Promise.all([request<SessionSummary[]>('/api/sessions'), id ? request<SessionData>(`/api/sessions/${id}`) : Promise.resolve(null)]);
+      const workspace = await loadWorkspace(id);
       if (seq !== sequence.current) return;
-      setSessions(list); setNetworkError('');
-      if (!id && list.length) { setSelectedId(list[0].id); } else { setData(details); setLoading(false); }
-    } catch (e) { if (seq === sequence.current) { setNetworkError((e as Error).message); setLoading(false); } }
+      setSessions(workspace.sessions);
+      setNetworkError('');
+      if (workspace.selectedId !== id) setSelectedId(workspace.selectedId);
+      setData(workspace.data);
+      setLoading(false);
+    } catch (e) {
+      if (seq === sequence.current) {
+        setNetworkError((e as Error).message);
+        setLoading(false);
+      }
+    }
   }, []);
   useEffect(() => {
-    setLoading(true); setData(null); setTicketId(null); setFilter('all'); setSearch('');
-    try { localStorage.setItem('mendroom.session.v1', selectedId); } catch { /* Storage is optional; SQLite remains authoritative. */ }
+    setLoading(true);
+    setData(null);
+    setTicketId(null);
+    setFilter('all');
+    setSearch('');
+    try {
+      localStorage.setItem('mendroom.session.v1', selectedId);
+    } catch {
+      /* Storage is optional; SQLite remains authoritative. */
+    }
     void refresh(selectedId);
-    const timer = window.setInterval(() => { if (!mutation.current) void refresh(selectedId); }, 20_000);
-    return () => { clearInterval(timer); sequence.current++; };
+    const timer = window.setInterval(() => {
+      if (!mutation.current) void refresh(selectedId);
+    }, 20_000);
+    return () => {
+      clearInterval(timer);
+      sequence.current++;
+    };
   }, [selectedId, refresh]);
-  useEffect(() => { if (!toast) return; const timer = window.setTimeout(() => setToast(''), 5000); return () => clearTimeout(timer); }, [toast]);
-  const open = (kind: Dialog) => { setError(''); setDialog(kind); };
-  const close = () => { if (!mutation.current) { setDialog(null); setTicketId(null); setError(''); } };
-  async function mutate(path: string, method: string, body: unknown, message: string, keepOpen = false) {
-    if (mutation.current) return;
-    mutation.current = true; setBusy(true); setError('');
+  useEffect(() => {
+    if (!toast) return;
+    const timer = window.setTimeout(() => setToast(''), 5000);
+    return () => clearTimeout(timer);
+  }, [toast]);
+  const open = (kind: Dialog) => {
+    setError('');
+    setDialog(kind);
+  };
+  const close = () => {
+    if (!mutation.current) {
+      setDialog(null);
+      setTicketId(null);
+      setError('');
+    }
+  };
+  async function mutate(
+    path: string,
+    method: string,
+    body: unknown,
+    message: string,
+    keepOpen = false,
+  ) {
+    if (mutation.current) return false;
+    mutation.current = true;
+    setBusy(true);
+    setError('');
     try {
       const result = await request<Session>(path, method, body);
-      if (['/api/sessions', '/api/sample', '/api/restore'].includes(path)) { setSelectedId(result.id); setView('workbench'); }
-      else await refresh(selectedRef.current);
-      if (!keepOpen) { setDialog(null); setTicketId(null); }
+      if (['/api/sessions', '/api/sample', '/api/restore'].includes(path)) {
+        setSelectedId(result.id);
+        setView('workbench');
+      } else await refresh(selectedRef.current);
+      if (!keepOpen) {
+        setDialog(null);
+        setTicketId(null);
+      }
       setToast(message);
-    } catch (e) { setError((e as Error).message); if ((e as Error).message.includes('changed')) void refresh(selectedRef.current); }
-    finally { mutation.current = false; setBusy(false); }
+      return true;
+    } catch (e) {
+      setError((e as Error).message);
+      if ((e as Error).message.includes('changed')) void refresh(selectedRef.current);
+      return false;
+    } finally {
+      mutation.current = false;
+      setBusy(false);
+    }
   }
   const endpoint = `/api/sessions/${selectedId}`;
   const tickets = data?.tickets || [];
   const volunteers = data?.volunteers || [];
-  const selectedTicket = tickets.find(t => t.id === ticketId);
-  const queued = tickets.filter(t => t.status === 'queued');
-  const active = tickets.filter(t => t.status === 'in-progress');
-  const repaired = tickets.filter(t => t.status === 'repaired');
-  const done = tickets.filter(t => t.status === 'repaired' || t.status === 'unrepairable');
-  const onDuty = volunteers.filter(v => v.available);
-  const filtered = tickets.filter(t => (filter === 'all' || t.status === filter) && `${t.item} ${t.visitor} ${t.number} ${t.issue}`.toLowerCase().includes(search.toLowerCase())).sort((a, b) => {
-    const order: Record<Status, number> = { queued: 0, 'in-progress': 1, 'waiting-parts': 2, repaired: 3, unrepairable: 4 };
-    return order[a.status] - order[b.status] || a.queueOrder - b.queueOrder;
-  });
-  const nextMatch = data?.forecast.find(f => f.waitMinutes === 0);
-  const nextTicket = tickets.find(t => t.id === nextMatch?.ticketId);
-  const showTicket = (ticket: Ticket) => { setError(''); setTicketId(ticket.id); };
-  const nav = [{ id: 'workbench' as const, label: 'Workbench', icon: Wrench }, { id: 'volunteers' as const, label: 'The volunteer team', icon: Users }, { id: 'journal' as const, label: 'Repair journal', icon: BookOpen }];
-  return <div className="app-shell">
-    <a className="skip-link" href="#main-content">Skip to main content</a>
-    <aside className="sidebar" aria-label="Main navigation">
-      <a className="brand" href="/" aria-label="Mendroom home"><span className="brand-mark"><Sprout size={26} strokeWidth={1.5} /></span><span>mendroom<span className="brand-period">.</span></span></a>
-      <div className="sidebar-caption">GOOD THINGS, KEPT GOING.</div>
-      <nav className="main-nav">{nav.map(n => <button key={n.id} className={view === n.id ? 'active' : ''} onClick={() => { setView(n.id); setSearch(''); setFilter('all'); }} aria-current={view === n.id ? 'page' : undefined}><n.icon size={18} strokeWidth={1.6} />{n.label}{n.id === 'workbench' && queued.length ? <span className="nav-count">{queued.length}</span> : null}</button>)}</nav>
-      <div className="session-nav"><div className="sidebar-label">YOUR SESSIONS<button aria-label="Create new session" onClick={() => open('session')}><Plus size={17} /></button></div><div className="session-list">{sessions.map(s => <button key={s.id} className={selectedId === s.id ? 'selected' : ''} onClick={() => setSelectedId(s.id)}><span className={`session-dot ${s.sample ? 'sample-dot' : ''}`} /><span>{s.title}<small>{s.sample ? 'Sample session' : niceDate(s.date)}</small></span></button>)}</div>{!sessions.length ? <p className="sidebar-empty">A place for every gathering.<br />Create your first session.</p> : null}</div>
-      <div className="sidebar-bottom"><div className="sidebar-note"><HeartHandshake size={22} strokeWidth={1.4} /><p>Made for the people<br />who keep things going.</p></div><button className="sidebar-help" onClick={() => open('data')}><ArrowDownToLine size={16} />Backups & reports<ArrowUpRight size={13} /></button>{!sessions.some(s => s.sample) ? <button className="sidebar-help sample-sidebar" disabled={busy} onClick={() => mutate('/api/sample', 'POST', {}, 'Fictional sample session opened.')}><Sprout size={16} />Explore a sample<ArrowUpRight size={13} /></button> : null}<button className="sidebar-help" onClick={() => open('about')}><CircleHelp size={16} />About Mendroom<ArrowUpRight size={13} /></button><div className="local-status"><i className={networkError ? 'offline' : ''} />{networkError ? 'Server connection lost' : 'Local storage · your computer'}</div></div>
-    </aside>
-    <div className="main-shell">
-      <header className="topbar"><div className="breadcrumb"><span>Your workspace</span><ChevronRight size={13} /><strong>{view === 'workbench' ? 'Workbench' : view === 'volunteers' ? 'Volunteer team' : 'Repair journal'}</strong></div><label className="mobile-session-picker"><CalendarDays size={13} /><select aria-label="Choose session" value={selectedId} onChange={e => { if (e.target.value === 'new') open('session'); else if (e.target.value === 'sample') void mutate('/api/sample', 'POST', {}, 'Fictional sample session opened.'); else setSelectedId(e.target.value); }}><option value="" disabled>Choose a session</option>{sessions.map(s => <option value={s.id} key={s.id}>{s.sample ? 'Sample · ' : ''}{s.title}</option>)}<option value="new">+ Create a session</option>{!sessions.some(s => s.sample) ? <option value="sample">Explore fictional sample</option> : null}</select><ChevronDown size={11} /></label><div className="top-actions"><span className="local-chip"><ShieldCheck size={13} />Local & private</span><button className="icon-button" title="Backups and reports" aria-label="Backups and reports" onClick={() => open('data')}><ArrowDownToLine size={16} /></button><button className="icon-button" title="Refresh session" aria-label="Refresh session" onClick={() => void refresh(selectedId)}><RefreshCw size={16} /></button><button className="avatar" onClick={() => open('about')} aria-label="About your local workspace">M</button></div></header>
-      <main id="main-content" className="main-content">
-        {networkError ? <div className="network-error" role="alert"><span>{networkError}</span><button onClick={() => void refresh(selectedId)}>Retry connection<RefreshCw size={14} /></button></div> : null}
-        <div className="page-heading"><div><p className="eyebrow">{view === 'workbench' ? 'LESS WASTE. MORE POSSIBILITY.' : view === 'volunteers' ? 'MANY HANDS. A LITTLE MAGIC.' : 'THE STORIES WORTH KEEPING.'}</p><h1>{view === 'workbench' ? 'Make room for repair.' : view === 'volunteers' ? 'Good people. Useful skills.' : 'Another chapter, together.'}</h1><p className="page-subtitle">{view === 'workbench' ? 'A calmer queue. The right hands. More things back in use.' : view === 'volunteers' ? 'Know who’s here, what they do, and when they need a break.' : 'What was repaired, what was learned, and what comes next.'}</p></div>{data ? <Button className="button primary" onClick={() => open(view === 'volunteers' ? 'volunteer' : 'intake')}><Plus size={17} />{view === 'volunteers' ? 'Add volunteer' : 'Check in item'}</Button> : <Button className="button primary" onClick={() => open('session')}><Plus size={17} />Create a session</Button>}</div>
-        {loading ? <div className="loading-state"><RefreshCw className="spin" size={24} /><p>Opening your workbench…</p></div> : data ? <>
-          <div className="event-strip"><span className="event-icon"><CalendarDays size={19} strokeWidth={1.6} /></span><div className="event-name"><strong>{data.session.title}</strong><span><span>{niceDate(data.session.date)}</span><i /><MapPin size={12} />{data.session.location}</span></div><span className="duration-chip">{data.session.durationMinutes / 60} hour session</span>{data.session.sample ? <span className="sample-label">Fictional sample data</span> : null}<button className="button subtle" onClick={() => open('session')}>New session<Plus size={14} /></button></div>
-          {data.session.sample ? <div className="sample-notice"><Sprout size={15} /><span>You’re exploring a sample session. Your real sessions start empty.</span><button onClick={() => open('session')}>Start your own<ArrowRight size={13} /></button></div> : null}
-          {view === 'workbench' ? <>
-            <div className="stats-grid"><Stat label="Waiting for a little care" value={queued.length} icon={<Clock3 size={19} />} detail={queued.some(t => t.reviewRequired) ? `${queued.filter(t => t.reviewRequired).length} on coordinator review` : 'Ready for a place at the bench'} /><Stat label="At the bench" value={active.length} icon={<Wrench size={19} />} detail="Good things in capable hands" /><Stat label="Back in use" value={repaired.length} icon={<Leaf size={19} />} detail={done.length ? `From ${done.length} completed ${done.length === 1 ? 'repair' : 'repairs'}` : 'Every repair makes a difference'} green /><Stat label="Volunteers on duty" value={onDuty.length} icon={<Users size={19} />} detail={`${volunteers.length - onDuty.length} taking a well-earned break`} /></div>
-            <div className="workbench-grid"><section className="queue-section"><div className="section-heading"><div><h2>The repair queue<span className="count">{tickets.length}</span></h2><p>Every item has a story. Let’s keep it going.</p></div><button className="icon-button" aria-label="About queue estimates" onClick={() => open('about')}><CircleHelp size={17} /></button></div><div className="queue-tools"><div className="queue-tabs" aria-label="Filter repair status">{(['all', 'queued', 'in-progress', 'waiting-parts'] as const).map(s => <button aria-pressed={filter === s} className={filter === s ? 'selected' : ''} key={s} onClick={() => setFilter(s)}>{s === 'all' ? 'All repairs' : s === 'queued' ? 'In queue' : s === 'in-progress' ? 'At bench' : 'Needs parts'}{s === 'all' ? <span>{tickets.length}</span> : null}</button>)}</div><label className="search-box"><Search size={15} /><input aria-label="Search repairs" value={search} onChange={e => setSearch(e.target.value)} placeholder="Find an item or visitor" />{search ? <button aria-label="Clear search" onClick={() => setSearch('')}><X size={13} /></button> : null}</label></div>
-              {filtered.length ? <div className="repair-table"><div className="table-head"><span>ITEM & VISITOR</span><span>STATUS</span><span>BENCH / ESTIMATE</span><span /></div>{filtered.map(t => <button className="repair-row" key={t.id} onClick={() => showTicket(t)} aria-label={`Open repair ${t.number}: ${t.item}`}><div className="item-cell"><CategoryIcon category={t.category} /><div><span className="item-name">{t.item}</span><span className="visitor-name"><TicketNumber ticket={t} />{t.visitor}{t.reviewRequired ? <span className="review-tag" title="Coordinator review needed"><ShieldCheck size={12} />Review</span> : null}</span></div></div><StatusBadge status={t.status} /><BenchEstimate ticket={t} data={data} /><ChevronRight className="row-chevron" size={16} /></button>)}</div> : <EmptyState icon={<Search size={25} />} title={tickets.length ? 'A little too specific?' : 'The first repair starts here.'}>{tickets.length ? 'Try another search or a different status.' : 'Check in an item to give it a place in the queue.'}</EmptyState>}
-              <div className="queue-footer"><span><i />{queued.length} in queue · {active.length} at the bench</span><span>Estimates are a guide, not appointments.</span></div></section>
-              <aside className="bench-column"><section className="bench-panel"><div className="section-heading compact"><h2>At the benches</h2><TextLink onClick={() => setView('volunteers')}>Team</TextLink></div>{volunteers.length ? <div className="bench-list">{volunteers.map((v, i) => { const repair = active.find(t => t.volunteerId === v.id); return <div className="bench-person" key={v.id}><span className={`person-avatar tone-${i % 4}`}>{v.name.split(' ').map(n => n[0]).slice(0, 2).join('')}</span><div><strong>{v.name}</strong><span>{repair ? repair.item : v.available ? v.skills.map(s => categoryLabels[s]).join(' · ') : 'Taking a break'}</span><small className={repair ? 'working' : v.available ? 'free' : 'on-break'}><i />{repair ? 'Repair in progress' : v.available ? 'Ready for a repair' : 'On a break'}</small></div>{repair ? <button aria-label={`Open ${v.name}’s repair`} className="icon-button" onClick={() => showTicket(repair)}><ArrowUpRight size={15} /></button> : null}</div>; })}</div> : <div className="small-empty"><Users size={24} /><p>A good repair starts with good people.</p><button onClick={() => open('volunteer')}>Add your first volunteer<Plus size={14} /></button></div>}</section>
-                <section className="next-match"><div className="next-match-label"><span><Sprout size={17} />A GOOD NEXT MATCH</span><span className="match-star">✳</span></div>{nextMatch && nextTicket ? <><h3>{nextTicket.item}</h3><p>{nextTicket.visitor}’s {categoryLabels[nextTicket.category].toLowerCase()} repair meets {nextMatch.volunteerName?.split(' ')[0]}’s skills.</p><div className="match-meta"><Clock3 size={13} />~{nextTicket.estimatedMinutes} min<span>Available now</span></div><Button className="button match-button full" busy={busy} onClick={() => mutate(`${endpoint}/tickets/${nextTicket.id}/actions`, 'POST', { action: 'assign', version: nextTicket.version, volunteerId: nextMatch.volunteerId }, 'A good match. Repair started.')}>Bring them together<ArrowRight size={16} /></Button></> : <><h3>{queued.length ? 'Good things take a moment.' : 'Room for something good.'}</h3><p>{queued.length ? 'No compatible bench is free right now. We’ll suggest a match when one opens up.' : 'Check in an item and we’ll look for a free volunteer with the right skills.'}</p></>}<FormError error={!dialog && !ticketId ? error : ''} /></section>
-                <QueueOutlook key={data.session.id} data={data} /><div className="care-note"><HeartHandshake size={22} strokeWidth={1.4} /><p>A repair café is as much about<br />people as it is about things.</p></div>
-              </aside></div>
-          </> : view === 'volunteers' ? <section className="roster-section"><div className="section-heading"><div><h2>The hands behind the repairs<span className="count">{volunteers.length}</span></h2><p>One active repair per person. Breaks pause new matching.</p></div></div>{volunteers.length ? <div className="roster-grid">{volunteers.map((v, i) => { const repair = active.find(t => t.volunteerId === v.id); return <article className="volunteer-card" key={v.id}><span className={`person-avatar large tone-${i % 4}`}>{v.name.split(' ').map(n => n[0]).slice(0, 2).join('')}</span><h3>{v.name}</h3><div className="skill-tags">{v.skills.map(s => <span key={s}>{categoryLabels[s]}</span>)}</div><div className="volunteer-work">{repair ? <button onClick={() => showTicket(repair)}><Wrench size={15} /><span>{repair.item}</span><ArrowUpRight size={14} /></button> : <p><i className={v.available ? 'free-dot' : ''} />{v.available ? 'Ready for the next repair' : 'Taking a break'}</p>}</div><Button className="button secondary full" busy={busy} onClick={() => mutate(`${endpoint}/volunteers/${v.id}`, 'PATCH', { available: !v.available, version: v.version }, `${v.name} is ${v.available ? 'taking a break' : 'available'}.`)}>{v.available ? <Coffee size={15} /> : <Check size={15} />}{v.available ? 'Take a break' : 'Back at the bench'}</Button></article>; })}</div> : <EmptyState icon={<Users size={28} />} title="A community of capable hands." action={<Button className="button primary" onClick={() => open('volunteer')}><Plus size={15} />Add a volunteer</Button>}>Add volunteers and their skills to start matching repairs.</EmptyState>}<FormError error={!dialog && !ticketId ? error : ''} /></section> : <section className="journal-section"><div className="section-heading"><div><h2>Small repairs. Lasting stories.<span className="count">{done.length}</span></h2><p>Honest outcomes, useful notes, and the things we learned.</p></div></div>{done.length ? <div className="journal-grid">{done.map(t => <button key={t.id} className="journal-card" onClick={() => showTicket(t)}><div className="inline between"><CategoryIcon category={t.category} /><StatusBadge status={t.status} /></div><h3>{t.item}</h3><p className="muted">{t.visitor} · <TicketNumber ticket={t} /></p><p className="journal-note">{t.notes}</p><span className="text-link">Read repair story<ArrowUpRight size={14} /></span></button>)}</div> : <EmptyState icon={<BookOpen size={28} />} title="The next chapter is still being written.">Completed repairs and their notes will appear here.</EmptyState>}</section>}
-          <footer className="workspace-footer"><span><Sprout size={15} />A little care. A longer life.</span><span>Saved locally · Mendroom 1.0</span></footer>
-        </> : <div className="welcome-grid"><section className="welcome-card"><div className="welcome-illustration"><Wrench size={50} strokeWidth={1.2} /><span className="orbit one"><Leaf size={23} /></span><span className="orbit two"><HeartHandshake size={27} /></span><span className="orbit three"><Sprout size={24} /></span></div><p className="eyebrow">WELCOME TO YOUR WORKBENCH</p><h2>Broken isn’t the<br />end of the story.</h2><p>Bring a little calm to your next community repair event. Welcome visitors, find the right hands, and keep every repair moving.</p><Button className="button primary" onClick={() => open('session')}><Plus size={17} />Create your first session</Button><button className="text-link sample-action" disabled={busy} onClick={() => mutate('/api/sample', 'POST', {}, 'Sample session opened. All names and items are fictional.')}>Or explore a sample session<ArrowRight size={15} /></button><FormError error={error} /></section><section className="welcome-steps"><p className="eyebrow">FROM THE DOOR TO DONE</p><h2>Less admin.<br />More mending.</h2>{[{ icon: <Users size={21} />, title: 'Gather your good people', copy: 'Add the team and the skills they bring.' }, { icon: <Wrench size={21} />, title: 'Give each item a place', copy: 'A fair queue, with clear matches to free benches.' }, { icon: <FolderHeart size={21} />, title: 'Keep the useful details', copy: 'Repair notes, parts to find, and a take-home record.' }].map((s, i) => <div className="welcome-step" key={s.title}><span>{s.icon}</span><div><small>0{i + 1}</small><h3>{s.title}</h3><p>{s.copy}</p></div></div>)}<div className="privacy-note"><ShieldCheck size={18} /><p>Your workspace lives on this computer.<br />No account. No cloud. No visitor data sent away.</p></div></section></div>}
-      </main>
+  const selectedTicket = tickets.find((t) => t.id === ticketId);
+  const queued = tickets.filter((t) => t.status === 'queued');
+  const active = tickets.filter((t) => t.status === 'in-progress');
+  const repaired = tickets.filter((t) => t.status === 'repaired');
+  const done = tickets.filter((t) => t.status === 'repaired' || t.status === 'unrepairable');
+  const onDuty = volunteers.filter((v) => v.available);
+  const filtered = tickets
+    .filter(
+      (t) =>
+        (filter === 'all' || t.status === filter) &&
+        `${t.item} ${t.visitor} ${t.number} ${t.issue}`
+          .toLowerCase()
+          .includes(search.toLowerCase()),
+    )
+    .sort((a, b) => {
+      const order: Record<Status, number> = {
+        queued: 0,
+        'in-progress': 1,
+        'waiting-parts': 2,
+        repaired: 3,
+        unrepairable: 4,
+      };
+      return order[a.status] - order[b.status] || a.queueOrder - b.queueOrder;
+    });
+  const nextMatch = data?.forecast.find((f) => f.waitMinutes === 0);
+  const nextTicket = tickets.find((t) => t.id === nextMatch?.ticketId);
+  const showTicket = (ticket: Ticket) => {
+    setError('');
+    setTicketId(ticket.id);
+  };
+  const nav = [
+    { id: 'workbench' as const, label: 'Workbench', icon: Wrench },
+    { id: 'volunteers' as const, label: 'The volunteer team', icon: Users },
+    { id: 'journal' as const, label: 'Repair journal', icon: BookOpen },
+  ];
+  return (
+    <div className="app-shell">
+      <a className="skip-link" href="#main-content">
+        Skip to main content
+      </a>
+      <aside className="sidebar" aria-label="Main navigation">
+        <a className="brand" href="/" aria-label="Mendroom home">
+          <span className="brand-mark">
+            <Sprout size={26} strokeWidth={1.5} />
+          </span>
+          <span>
+            mendroom<span className="brand-period">.</span>
+          </span>
+        </a>
+        <div className="sidebar-caption">GOOD THINGS, KEPT GOING.</div>
+        <nav className="main-nav">
+          {nav.map((n) => (
+            <button
+              key={n.id}
+              className={view === n.id ? 'active' : ''}
+              onClick={() => {
+                setView(n.id);
+                setSearch('');
+                setFilter('all');
+              }}
+              aria-current={view === n.id ? 'page' : undefined}
+            >
+              <n.icon size={18} strokeWidth={1.6} />
+              {n.label}
+              {n.id === 'workbench' && queued.length ? (
+                <span className="nav-count">{queued.length}</span>
+              ) : null}
+            </button>
+          ))}
+        </nav>
+        <div className="session-nav">
+          <div className="sidebar-label">
+            YOUR SESSIONS
+            <button aria-label="Create new session" onClick={() => open('session')}>
+              <Plus size={17} />
+            </button>
+          </div>
+          <div className="session-list">
+            {sessions.map((s) => (
+              <button
+                key={s.id}
+                className={selectedId === s.id ? 'selected' : ''}
+                onClick={() => setSelectedId(s.id)}
+              >
+                <span className={`session-dot ${s.sample ? 'sample-dot' : ''}`} />
+                <span>
+                  {s.title}
+                  <small>{s.sample ? 'Sample session' : niceDate(s.date)}</small>
+                </span>
+              </button>
+            ))}
+          </div>
+          {!sessions.length ? (
+            <p className="sidebar-empty">
+              A place for every gathering.
+              <br />
+              Create your first session.
+            </p>
+          ) : null}
+        </div>
+        <div className="sidebar-bottom">
+          <div className="sidebar-note">
+            <HeartHandshake size={22} strokeWidth={1.4} />
+            <p>
+              Made for the people
+              <br />
+              who keep things going.
+            </p>
+          </div>
+          <button className="sidebar-help" onClick={() => open('data')}>
+            <ArrowDownToLine size={16} />
+            Backups & reports
+            <ArrowUpRight size={13} />
+          </button>
+          {!sessions.some((s) => s.sample) ? (
+            <button
+              className="sidebar-help sample-sidebar"
+              disabled={busy}
+              onClick={() => mutate('/api/sample', 'POST', {}, 'Fictional sample session opened.')}
+            >
+              <Sprout size={16} />
+              Explore a sample
+              <ArrowUpRight size={13} />
+            </button>
+          ) : null}
+          <button className="sidebar-help" onClick={() => open('about')}>
+            <CircleHelp size={16} />
+            About Mendroom
+            <ArrowUpRight size={13} />
+          </button>
+          <div className="local-status">
+            <i className={networkError ? 'offline' : ''} />
+            {networkError ? 'Server connection lost' : 'Local storage · your computer'}
+          </div>
+        </div>
+      </aside>
+      <div className="main-shell">
+        <header className="topbar">
+          <div className="breadcrumb">
+            <span>Your workspace</span>
+            <ChevronRight size={13} />
+            <strong>
+              {view === 'workbench'
+                ? 'Workbench'
+                : view === 'volunteers'
+                  ? 'Volunteer team'
+                  : 'Repair journal'}
+            </strong>
+          </div>
+          <label className="mobile-session-picker">
+            <CalendarDays size={13} />
+            <select
+              aria-label="Choose session"
+              value={selectedId}
+              onChange={(e) => {
+                if (e.target.value === 'new') open('session');
+                else if (e.target.value === 'sample')
+                  void mutate('/api/sample', 'POST', {}, 'Fictional sample session opened.');
+                else setSelectedId(e.target.value);
+              }}
+            >
+              <option value="" disabled>
+                Choose a session
+              </option>
+              {sessions.map((s) => (
+                <option value={s.id} key={s.id}>
+                  {s.sample ? 'Sample · ' : ''}
+                  {s.title}
+                </option>
+              ))}
+              <option value="new">+ Create a session</option>
+              {!sessions.some((s) => s.sample) ? (
+                <option value="sample">Explore fictional sample</option>
+              ) : null}
+            </select>
+            <ChevronDown size={11} />
+          </label>
+          <div className="top-actions">
+            <span className="local-chip">
+              <ShieldCheck size={13} />
+              Local & private
+            </span>
+            <button
+              className="icon-button"
+              title="Backups and reports"
+              aria-label="Backups and reports"
+              onClick={() => open('data')}
+            >
+              <ArrowDownToLine size={16} />
+            </button>
+            <button
+              className="icon-button"
+              title="Refresh session"
+              aria-label="Refresh session"
+              onClick={() => void refresh(selectedId)}
+            >
+              <RefreshCw size={16} />
+            </button>
+            <button
+              className="avatar"
+              onClick={() => open('about')}
+              aria-label="About your local workspace"
+            >
+              M
+            </button>
+          </div>
+        </header>
+        <main id="main-content" className="main-content">
+          {networkError ? (
+            <div className="network-error" role="alert">
+              <span>{networkError}</span>
+              <button onClick={() => void refresh(selectedId)}>
+                Retry connection
+                <RefreshCw size={14} />
+              </button>
+            </div>
+          ) : null}
+          <div className="page-heading">
+            <div>
+              <p className="eyebrow">
+                {view === 'workbench'
+                  ? 'LESS WASTE. MORE POSSIBILITY.'
+                  : view === 'volunteers'
+                    ? 'MANY HANDS. A LITTLE MAGIC.'
+                    : 'THE STORIES WORTH KEEPING.'}
+              </p>
+              <h1>
+                {view === 'workbench'
+                  ? 'Make room for repair.'
+                  : view === 'volunteers'
+                    ? 'Good people. Useful skills.'
+                    : 'Another chapter, together.'}
+              </h1>
+              <p className="page-subtitle">
+                {view === 'workbench'
+                  ? 'A calmer queue. The right hands. More things back in use.'
+                  : view === 'volunteers'
+                    ? 'Know who’s here, what they do, and when they need a break.'
+                    : 'What was repaired, what was learned, and what comes next.'}
+              </p>
+            </div>
+            {data ? (
+              <Button
+                className="button primary"
+                onClick={() => open(view === 'volunteers' ? 'volunteer' : 'intake')}
+              >
+                <Plus size={17} />
+                {view === 'volunteers' ? 'Add volunteer' : 'Check in item'}
+              </Button>
+            ) : (
+              <Button className="button primary" onClick={() => open('session')}>
+                <Plus size={17} />
+                Create a session
+              </Button>
+            )}
+          </div>
+          {loading ? (
+            <div className="loading-state">
+              <RefreshCw className="spin" size={24} />
+              <p>Opening your workbench…</p>
+            </div>
+          ) : data ? (
+            <>
+              <div className="event-strip">
+                <span className="event-icon">
+                  <CalendarDays size={19} strokeWidth={1.6} />
+                </span>
+                <div className="event-name">
+                  <strong>{data.session.title}</strong>
+                  <span>
+                    <span>{niceDate(data.session.date)}</span>
+                    <i />
+                    <MapPin size={12} />
+                    {data.session.location}
+                  </span>
+                </div>
+                <span className="duration-chip">
+                  {data.session.durationMinutes / 60} hour session
+                </span>
+                {data.session.sample ? (
+                  <span className="sample-label">Fictional sample data</span>
+                ) : null}
+                <button className="button subtle" onClick={() => open('session')}>
+                  New session
+                  <Plus size={14} />
+                </button>
+              </div>
+              {data.session.sample ? (
+                <div className="sample-notice">
+                  <Sprout size={15} />
+                  <span>You’re exploring a sample session. Your real sessions start empty.</span>
+                  <button onClick={() => open('session')}>
+                    Start your own
+                    <ArrowRight size={13} />
+                  </button>
+                </div>
+              ) : null}
+              {view === 'workbench' ? (
+                <>
+                  <div className="stats-grid">
+                    <Stat
+                      label="Waiting for a little care"
+                      value={queued.length}
+                      icon={<Clock3 size={19} />}
+                      detail={
+                        queued.some((t) => t.reviewRequired)
+                          ? `${queued.filter((t) => t.reviewRequired).length} on coordinator review`
+                          : 'Ready for a place at the bench'
+                      }
+                    />
+                    <Stat
+                      label="At the bench"
+                      value={active.length}
+                      icon={<Wrench size={19} />}
+                      detail="Good things in capable hands"
+                    />
+                    <Stat
+                      label="Back in use"
+                      value={repaired.length}
+                      icon={<Leaf size={19} />}
+                      detail={
+                        done.length
+                          ? `From ${done.length} completed ${done.length === 1 ? 'repair' : 'repairs'}`
+                          : 'Every repair makes a difference'
+                      }
+                      green
+                    />
+                    <Stat
+                      label="Volunteers on duty"
+                      value={onDuty.length}
+                      icon={<Users size={19} />}
+                      detail={`${volunteers.length - onDuty.length} taking a well-earned break`}
+                    />
+                  </div>
+                  <div className="workbench-grid">
+                    <section className="queue-section">
+                      <div className="section-heading">
+                        <div>
+                          <h2>
+                            The repair queue<span className="count">{tickets.length}</span>
+                          </h2>
+                          <p>Every item has a story. Let’s keep it going.</p>
+                        </div>
+                        <button
+                          className="icon-button"
+                          aria-label="About queue estimates"
+                          onClick={() => open('about')}
+                        >
+                          <CircleHelp size={17} />
+                        </button>
+                      </div>
+                      <div className="queue-tools">
+                        <div className="queue-tabs" aria-label="Filter repair status">
+                          {(['all', 'queued', 'in-progress', 'waiting-parts'] as const).map((s) => (
+                            <button
+                              aria-pressed={filter === s}
+                              className={filter === s ? 'selected' : ''}
+                              key={s}
+                              onClick={() => setFilter(s)}
+                            >
+                              {s === 'all'
+                                ? 'All repairs'
+                                : s === 'queued'
+                                  ? 'In queue'
+                                  : s === 'in-progress'
+                                    ? 'At bench'
+                                    : 'Needs parts'}
+                              {s === 'all' ? <span>{tickets.length}</span> : null}
+                            </button>
+                          ))}
+                        </div>
+                        <label className="search-box">
+                          <Search size={15} />
+                          <input
+                            aria-label="Search repairs"
+                            value={search}
+                            onChange={(e) => setSearch(e.target.value)}
+                            placeholder="Find an item or visitor"
+                          />
+                          {search ? (
+                            <button aria-label="Clear search" onClick={() => setSearch('')}>
+                              <X size={13} />
+                            </button>
+                          ) : null}
+                        </label>
+                      </div>
+                      {filtered.length ? (
+                        <div className="repair-table">
+                          <div className="table-head">
+                            <span>ITEM & VISITOR</span>
+                            <span>STATUS</span>
+                            <span>BENCH / ESTIMATE</span>
+                            <span />
+                          </div>
+                          {filtered.map((t) => (
+                            <button
+                              className="repair-row"
+                              key={t.id}
+                              onClick={() => showTicket(t)}
+                              aria-label={`Open repair ${t.number}: ${t.item}`}
+                            >
+                              <div className="item-cell">
+                                <CategoryIcon category={t.category} />
+                                <div>
+                                  <span className="item-name">{t.item}</span>
+                                  <span className="visitor-name">
+                                    <TicketNumber ticket={t} />
+                                    {t.visitor}
+                                    {t.reviewRequired ? (
+                                      <span
+                                        className="review-tag"
+                                        title="Coordinator review needed"
+                                      >
+                                        <ShieldCheck size={12} />
+                                        Review
+                                      </span>
+                                    ) : null}
+                                  </span>
+                                </div>
+                              </div>
+                              <StatusBadge status={t.status} />
+                              <BenchEstimate ticket={t} data={data} />
+                              <ChevronRight className="row-chevron" size={16} />
+                            </button>
+                          ))}
+                        </div>
+                      ) : (
+                        <EmptyState
+                          icon={<Search size={25} />}
+                          title={
+                            tickets.length
+                              ? 'A little too specific?'
+                              : 'The first repair starts here.'
+                          }
+                        >
+                          {tickets.length
+                            ? 'Try another search or a different status.'
+                            : 'Check in an item to give it a place in the queue.'}
+                        </EmptyState>
+                      )}
+                      <div className="queue-footer">
+                        <span>
+                          <i />
+                          {queued.length} in queue · {active.length} at the bench
+                        </span>
+                        <span>Estimates are a guide, not appointments.</span>
+                      </div>
+                    </section>
+                    <aside className="bench-column">
+                      <section className="bench-panel">
+                        <div className="section-heading compact">
+                          <h2>At the benches</h2>
+                          <TextLink onClick={() => setView('volunteers')}>Team</TextLink>
+                        </div>
+                        {volunteers.length ? (
+                          <div className="bench-list">
+                            {volunteers.map((v, i) => {
+                              const repair = active.find((t) => t.volunteerId === v.id);
+                              return (
+                                <div className="bench-person" key={v.id}>
+                                  <span className={`person-avatar tone-${i % 4}`}>
+                                    {v.name
+                                      .split(' ')
+                                      .map((n) => n[0])
+                                      .slice(0, 2)
+                                      .join('')}
+                                  </span>
+                                  <div>
+                                    <strong>{v.name}</strong>
+                                    <span>
+                                      {repair
+                                        ? repair.item
+                                        : v.available
+                                          ? v.skills.map((s) => categoryLabels[s]).join(' · ')
+                                          : 'Taking a break'}
+                                    </span>
+                                    <small
+                                      className={
+                                        repair ? 'working' : v.available ? 'free' : 'on-break'
+                                      }
+                                    >
+                                      <i />
+                                      {repair
+                                        ? 'Repair in progress'
+                                        : v.available
+                                          ? 'Ready for a repair'
+                                          : 'On a break'}
+                                    </small>
+                                  </div>
+                                  {repair ? (
+                                    <button
+                                      aria-label={`Open ${v.name}’s repair`}
+                                      className="icon-button"
+                                      onClick={() => showTicket(repair)}
+                                    >
+                                      <ArrowUpRight size={15} />
+                                    </button>
+                                  ) : null}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        ) : (
+                          <div className="small-empty">
+                            <Users size={24} />
+                            <p>A good repair starts with good people.</p>
+                            <button onClick={() => open('volunteer')}>
+                              Add your first volunteer
+                              <Plus size={14} />
+                            </button>
+                          </div>
+                        )}
+                      </section>
+                      <section className="next-match">
+                        <div className="next-match-label">
+                          <span>
+                            <Sprout size={17} />A GOOD NEXT MATCH
+                          </span>
+                          <span className="match-star">✳</span>
+                        </div>
+                        {nextMatch && nextTicket ? (
+                          <>
+                            <h3>{nextTicket.item}</h3>
+                            <p>
+                              {nextTicket.visitor}’s{' '}
+                              {categoryLabels[nextTicket.category].toLowerCase()} repair meets{' '}
+                              {nextMatch.volunteerName?.split(' ')[0]}’s skills.
+                            </p>
+                            <div className="match-meta">
+                              <Clock3 size={13} />~{nextTicket.estimatedMinutes} min
+                              <span>Available now</span>
+                            </div>
+                            <Button
+                              className="button match-button full"
+                              busy={busy}
+                              onClick={() =>
+                                mutate(
+                                  `${endpoint}/tickets/${nextTicket.id}/actions`,
+                                  'POST',
+                                  {
+                                    action: 'assign',
+                                    version: nextTicket.version,
+                                    volunteerId: nextMatch.volunteerId,
+                                  },
+                                  'A good match. Repair started.',
+                                )
+                              }
+                            >
+                              Bring them together
+                              <ArrowRight size={16} />
+                            </Button>
+                          </>
+                        ) : (
+                          <>
+                            <h3>
+                              {queued.length
+                                ? 'Good things take a moment.'
+                                : 'Room for something good.'}
+                            </h3>
+                            <p>
+                              {queued.length
+                                ? 'No compatible bench is free right now. We’ll suggest a match when one opens up.'
+                                : 'Check in an item and we’ll look for a free volunteer with the right skills.'}
+                            </p>
+                          </>
+                        )}
+                        <FormError error={!dialog && !ticketId ? error : ''} />
+                      </section>
+                      <QueueOutlook key={data.session.id} data={data} />
+                      <div className="care-note">
+                        <HeartHandshake size={22} strokeWidth={1.4} />
+                        <p>
+                          A repair café is as much about
+                          <br />
+                          people as it is about things.
+                        </p>
+                      </div>
+                    </aside>
+                  </div>
+                </>
+              ) : view === 'volunteers' ? (
+                <section className="roster-section">
+                  <div className="section-heading">
+                    <div>
+                      <h2>
+                        The hands behind the repairs
+                        <span className="count">{volunteers.length}</span>
+                      </h2>
+                      <p>One active repair per person. Breaks pause new matching.</p>
+                    </div>
+                  </div>
+                  {volunteers.length ? (
+                    <div className="roster-grid">
+                      {volunteers.map((v, i) => {
+                        const repair = active.find((t) => t.volunteerId === v.id);
+                        return (
+                          <article className="volunteer-card" key={v.id}>
+                            <span className={`person-avatar large tone-${i % 4}`}>
+                              {v.name
+                                .split(' ')
+                                .map((n) => n[0])
+                                .slice(0, 2)
+                                .join('')}
+                            </span>
+                            <h3>{v.name}</h3>
+                            <div className="skill-tags">
+                              {v.skills.map((s) => (
+                                <span key={s}>{categoryLabels[s]}</span>
+                              ))}
+                            </div>
+                            <div className="volunteer-work">
+                              {repair ? (
+                                <button onClick={() => showTicket(repair)}>
+                                  <Wrench size={15} />
+                                  <span>{repair.item}</span>
+                                  <ArrowUpRight size={14} />
+                                </button>
+                              ) : (
+                                <p>
+                                  <i className={v.available ? 'free-dot' : ''} />
+                                  {v.available ? 'Ready for the next repair' : 'Taking a break'}
+                                </p>
+                              )}
+                            </div>
+                            <Button
+                              className="button secondary full"
+                              busy={busy}
+                              onClick={() =>
+                                mutate(
+                                  `${endpoint}/volunteers/${v.id}`,
+                                  'PATCH',
+                                  { available: !v.available, version: v.version },
+                                  `${v.name} is ${v.available ? 'taking a break' : 'available'}.`,
+                                )
+                              }
+                            >
+                              {v.available ? <Coffee size={15} /> : <Check size={15} />}
+                              {v.available ? 'Take a break' : 'Back at the bench'}
+                            </Button>
+                          </article>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <EmptyState
+                      icon={<Users size={28} />}
+                      title="A community of capable hands."
+                      action={
+                        <Button className="button primary" onClick={() => open('volunteer')}>
+                          <Plus size={15} />
+                          Add a volunteer
+                        </Button>
+                      }
+                    >
+                      Add volunteers and their skills to start matching repairs.
+                    </EmptyState>
+                  )}
+                  <FormError error={!dialog && !ticketId ? error : ''} />
+                </section>
+              ) : (
+                <section className="journal-section">
+                  <div className="section-heading">
+                    <div>
+                      <h2>
+                        Small repairs. Lasting stories.<span className="count">{done.length}</span>
+                      </h2>
+                      <p>Honest outcomes, useful notes, and the things we learned.</p>
+                    </div>
+                  </div>
+                  {done.length ? (
+                    <div className="journal-grid">
+                      {done.map((t) => (
+                        <button key={t.id} className="journal-card" onClick={() => showTicket(t)}>
+                          <div className="inline between">
+                            <CategoryIcon category={t.category} />
+                            <StatusBadge status={t.status} />
+                          </div>
+                          <h3>{t.item}</h3>
+                          <p className="muted">
+                            {t.visitor} · <TicketNumber ticket={t} />
+                          </p>
+                          <p className="journal-note">{t.notes}</p>
+                          <span className="text-link">
+                            Read repair story
+                            <ArrowUpRight size={14} />
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <EmptyState
+                      icon={<BookOpen size={28} />}
+                      title="The next chapter is still being written."
+                    >
+                      Completed repairs and their notes will appear here.
+                    </EmptyState>
+                  )}
+                </section>
+              )}
+              <footer className="workspace-footer">
+                <span>
+                  <Sprout size={15} />A little care. A longer life.
+                </span>
+                <span>Saved locally · Mendroom 1.0</span>
+              </footer>
+            </>
+          ) : (
+            <div className="welcome-grid">
+              <section className="welcome-card">
+                <div className="welcome-illustration">
+                  <Wrench size={50} strokeWidth={1.2} />
+                  <span className="orbit one">
+                    <Leaf size={23} />
+                  </span>
+                  <span className="orbit two">
+                    <HeartHandshake size={27} />
+                  </span>
+                  <span className="orbit three">
+                    <Sprout size={24} />
+                  </span>
+                </div>
+                <p className="eyebrow">WELCOME TO YOUR WORKBENCH</p>
+                <h2>
+                  Broken isn’t the
+                  <br />
+                  end of the story.
+                </h2>
+                <p>
+                  Bring a little calm to your next community repair event. Welcome visitors, find
+                  the right hands, and keep every repair moving.
+                </p>
+                <Button className="button primary" onClick={() => open('session')}>
+                  <Plus size={17} />
+                  Create your first session
+                </Button>
+                <button
+                  className="text-link sample-action"
+                  disabled={busy}
+                  onClick={() =>
+                    mutate(
+                      '/api/sample',
+                      'POST',
+                      {},
+                      'Sample session opened. All names and items are fictional.',
+                    )
+                  }
+                >
+                  Or explore a sample session
+                  <ArrowRight size={15} />
+                </button>
+                <FormError error={error} />
+              </section>
+              <section className="welcome-steps">
+                <p className="eyebrow">FROM THE DOOR TO DONE</p>
+                <h2>
+                  Less admin.
+                  <br />
+                  More mending.
+                </h2>
+                {[
+                  {
+                    icon: <Users size={21} />,
+                    title: 'Gather your good people',
+                    copy: 'Add the team and the skills they bring.',
+                  },
+                  {
+                    icon: <Wrench size={21} />,
+                    title: 'Give each item a place',
+                    copy: 'A fair queue, with clear matches to free benches.',
+                  },
+                  {
+                    icon: <FolderHeart size={21} />,
+                    title: 'Keep the useful details',
+                    copy: 'Repair notes, parts to find, and a take-home record.',
+                  },
+                ].map((s, i) => (
+                  <div className="welcome-step" key={s.title}>
+                    <span>{s.icon}</span>
+                    <div>
+                      <small>0{i + 1}</small>
+                      <h3>{s.title}</h3>
+                      <p>{s.copy}</p>
+                    </div>
+                  </div>
+                ))}
+                <div className="privacy-note">
+                  <ShieldCheck size={18} />
+                  <p>
+                    Your workspace lives on this computer.
+                    <br />
+                    No account. No cloud. No visitor data sent away.
+                  </p>
+                </div>
+              </section>
+            </div>
+          )}
+        </main>
+      </div>
+      {dialog === 'session' ? (
+        <Modal
+          title="A new gathering."
+          subtitle="Make a little room for good things to happen."
+          onClose={close}
+        >
+          <SessionForm
+            busy={busy}
+            error={error}
+            onSave={(body) =>
+              mutate('/api/sessions', 'POST', body, 'Your session is ready. Let’s gather the team.')
+            }
+          />
+        </Modal>
+      ) : null}
+      {dialog === 'intake' && data ? (
+        <Modal
+          title="What’s coming to the bench?"
+          subtitle="A few details now make a smoother repair later."
+          onClose={close}
+        >
+          <IntakeForm
+            busy={busy}
+            error={error}
+            onSave={(body) =>
+              mutate(`${endpoint}/tickets`, 'POST', body, 'Checked in. A new chapter starts here.')
+            }
+          />
+        </Modal>
+      ) : null}
+      {dialog === 'volunteer' && data ? (
+        <Modal
+          title="Another pair of good hands."
+          subtitle="Add a volunteer and the skills they bring."
+          onClose={close}
+        >
+          <VolunteerForm
+            busy={busy}
+            error={error}
+            onSave={(body) =>
+              mutate(`${endpoint}/volunteers`, 'POST', body, 'Welcome to the team.')
+            }
+          />
+        </Modal>
+      ) : null}
+      {dialog === 'data' ? (
+        <Modal
+          title="Keep the useful things."
+          subtitle="A portable copy, a clear report, a way back."
+          onClose={close}
+        >
+          <DataTools
+            data={data}
+            busy={busy}
+            error={error}
+            onRestore={(body) =>
+              mutate('/api/restore', 'POST', body, 'Backup restored as a separate session.')
+            }
+          />
+        </Modal>
+      ) : null}
+      {selectedTicket && data ? (
+        <Modal title="The repair record" onClose={close} wide>
+          <RepairDetails
+            key={selectedTicket.id}
+            ticket={selectedTicket}
+            data={data}
+            busy={busy}
+            error={error}
+            onAction={(action) =>
+              mutate(
+                `${endpoint}/tickets/${selectedTicket.id}/actions`,
+                'POST',
+                { ...action, version: selectedTicket.version },
+                'Repair record saved.',
+                true,
+              )
+            }
+          />
+        </Modal>
+      ) : null}
+      {dialog === 'about' ? (
+        <Modal title="Good things, kept going." onClose={close}>
+          <div className="about-content">
+            <p>
+              Mendroom is a free, local workbench for the people running community repair events.
+            </p>
+            <h3>Fair queues, human decisions.</h3>
+            <p>
+              Matching uses selected skills, availability and intake order. Queue projections add
+              estimated bench times to a volunteer’s remaining work. Breaks and coordinator holds
+              are excluded. Estimates change as work progresses and are not appointments.
+            </p>
+            <h3>Carefully local.</h3>
+            <p>
+              Records are saved in SQLite on this computer. A first name or alias is enough. This
+              edition is intended for one trusted coordinator; it has no remote accounts or network
+              sharing.
+            </p>
+            <h3>Repair with care.</h3>
+            <p>
+              Mendroom coordinates work. It does not provide repair instructions, certify safety, or
+              replace a qualified repairer’s judgment.
+            </p>
+            <a
+              className="text-link"
+              href="https://github.com/ZephyrusZorro/mendroom"
+              target="_blank"
+              rel="noreferrer"
+            >
+              Open-source on GitHub
+              <ArrowUpRight size={14} />
+            </a>
+          </div>
+        </Modal>
+      ) : null}
+      {toast ? (
+        <div className="toast" role="status">
+          <CheckCircle2 size={18} />
+          <span>{toast}</span>
+          <button aria-label="Dismiss notification" onClick={() => setToast('')}>
+            <X size={14} />
+          </button>
+        </div>
+      ) : null}
     </div>
-    {dialog === 'session' ? <Modal title="A new gathering." subtitle="Make a little room for good things to happen." onClose={close}><SessionForm busy={busy} error={error} onSave={body => mutate('/api/sessions', 'POST', body, 'Your session is ready. Let’s gather the team.')} /></Modal> : null}
-    {dialog === 'intake' && data ? <Modal title="What’s coming to the bench?" subtitle="A few details now make a smoother repair later." onClose={close}><IntakeForm busy={busy} error={error} onSave={body => mutate(`${endpoint}/tickets`, 'POST', body, 'Checked in. A new chapter starts here.')} /></Modal> : null}
-    {dialog === 'volunteer' && data ? <Modal title="Another pair of good hands." subtitle="Add a volunteer and the skills they bring." onClose={close}><VolunteerForm busy={busy} error={error} onSave={body => mutate(`${endpoint}/volunteers`, 'POST', body, 'Welcome to the team.')} /></Modal> : null}
-    {dialog === 'data' ? <Modal title="Keep the useful things." subtitle="A portable copy, a clear report, a way back." onClose={close}><DataTools data={data} busy={busy} error={error} onRestore={body => mutate('/api/restore', 'POST', body, 'Backup restored as a separate session.')} /></Modal> : null}
-    {selectedTicket && data ? <Modal title="The repair record" onClose={close} wide><RepairDetails key={selectedTicket.id} ticket={selectedTicket} data={data} busy={busy} error={error} onAction={action => mutate(`${endpoint}/tickets/${selectedTicket.id}/actions`, 'POST', { ...action, version: selectedTicket.version }, 'Repair record saved.', true)} /></Modal> : null}
-    {dialog === 'about' ? <Modal title="Good things, kept going." onClose={close}><div className="about-content"><p>Mendroom is a free, local workbench for the people running community repair events.</p><h3>Fair queues, human decisions.</h3><p>Matching uses selected skills, availability and intake order. Queue projections add estimated bench times to a volunteer’s remaining work. Breaks and coordinator holds are excluded. Estimates change as work progresses and are not appointments.</p><h3>Carefully local.</h3><p>Records are saved in SQLite on this computer. A first name or alias is enough. This edition is intended for one trusted coordinator; it has no remote accounts or network sharing.</p><h3>Repair with care.</h3><p>Mendroom coordinates work. It does not provide repair instructions, certify safety, or replace a qualified repairer’s judgment.</p><a className="text-link" href="https://github.com/ZephyrusZorro/mendroom" target="_blank" rel="noreferrer">Open-source on GitHub<ArrowUpRight size={14} /></a></div></Modal> : null}
-    {toast ? <div className="toast" role="status"><CheckCircle2 size={18} /><span>{toast}</span><button aria-label="Dismiss notification" onClick={() => setToast('')}><X size={14} /></button></div> : null}
-  </div>;
+  );
 }
-function Stat({ label, value, detail, icon, green = false }: { label: string; value: number; detail: string; icon: React.ReactNode; green?: boolean }) { return <div className={`stat ${green ? 'green-stat' : ''}`}><div className="stat-label">{label}<span>{icon}</span></div><strong>{String(value).padStart(2, '0')}</strong><p>{detail}</p></div>; }
+function Stat({
+  label,
+  value,
+  detail,
+  icon,
+  green = false,
+}: {
+  label: string;
+  value: number;
+  detail: string;
+  icon: React.ReactNode;
+  green?: boolean;
+}) {
+  return (
+    <div className={`stat ${green ? 'green-stat' : ''}`}>
+      <div className="stat-label">
+        {label}
+        <span>{icon}</span>
+      </div>
+      <strong>{String(value).padStart(2, '0')}</strong>
+      <p>{detail}</p>
+    </div>
+  );
+}
 function BenchEstimate({ ticket, data }: { ticket: Ticket; data: SessionData }) {
-  const v = data.volunteers.find(v => v.id === ticket.volunteerId);
-  const estimate = data.forecast.find(f => f.ticketId === ticket.id);
-  return <div className="bench-estimate">{ticket.status === 'in-progress' ? <><strong>{v?.name.split(' ')[0] || 'Volunteer'}</strong><span>{ticket.estimatedMinutes} min estimate</span></> : ticket.status === 'queued' ? <><strong>{ticket.reviewRequired ? 'Review first' : estimate?.waitMinutes === null ? 'Skill needed' : estimate?.waitMinutes === 0 ? 'Ready to match' : `~${estimate?.waitMinutes} min wait`}</strong><span>{ticket.reviewRequired ? 'Coordinator hold' : estimate?.volunteerName?.split(' ')[0] || categoryLabels[ticket.category]}</span></> : <><strong>{ticket.status === 'waiting-parts' ? 'Follow-up' : 'Recorded'}</strong><span>{ticket.status === 'waiting-parts' ? 'Parts to find' : 'View repair notes'}</span></>}</div>;
+  const v = data.volunteers.find((v) => v.id === ticket.volunteerId);
+  const estimate = data.forecast.find((f) => f.ticketId === ticket.id);
+  return (
+    <div className="bench-estimate">
+      {ticket.status === 'in-progress' ? (
+        <>
+          <strong>{v?.name.split(' ')[0] || 'Volunteer'}</strong>
+          <span>{ticket.estimatedMinutes} min estimate</span>
+        </>
+      ) : ticket.status === 'queued' ? (
+        <>
+          <strong>
+            {ticket.reviewRequired
+              ? 'Review first'
+              : estimate?.waitMinutes === null
+                ? 'Skill needed'
+                : estimate?.waitMinutes === 0
+                  ? 'Ready to match'
+                  : `~${estimate?.waitMinutes} min wait`}
+          </strong>
+          <span>
+            {ticket.reviewRequired
+              ? 'Coordinator hold'
+              : estimate?.volunteerName?.split(' ')[0] || categoryLabels[ticket.category]}
+          </span>
+        </>
+      ) : (
+        <>
+          <strong>{ticket.status === 'waiting-parts' ? 'Follow-up' : 'Recorded'}</strong>
+          <span>{ticket.status === 'waiting-parts' ? 'Parts to find' : 'View repair notes'}</span>
+        </>
+      )}
+    </div>
+  );
 }
 function QueueOutlook({ data }: { data: SessionData }) {
   const [windowMinutes, setWindowMinutes] = useState(60);
-  const fits = data.forecast.filter(f => f.finishMinutes !== null && f.finishMinutes <= windowMinutes).length;
-  const blocked = data.forecast.filter(f => f.finishMinutes === null).length;
+  const fits = data.forecast.filter(
+    (f) => f.finishMinutes !== null && f.finishMinutes <= windowMinutes,
+  ).length;
+  const blocked = data.forecast.filter((f) => f.finishMinutes === null).length;
   const total = data.forecast.length;
-  return <section className="outlook-panel"><div className="outlook-heading"><h3>A realistic rhythm.</h3><Clock3 size={16} /></div><label>Window from now<select aria-label="Planning window from now" value={windowMinutes} onChange={e => setWindowMinutes(Number(e.target.value))}>{[30, 60, 90, 120, 180].map(n => <option value={n} key={n}>{n} min</option>)}</select></label><div className="outlook-bar" role="img" aria-label={`${fits} of ${total} queued repairs are estimated to fit within ${windowMinutes} minutes`}><span style={{ width: `${total ? fits / total * 100 : 0}%` }} /></div><p><strong>{fits} of {total}</strong> queued repairs estimated to fit.{blocked ? ` ${blocked} need review or an available skill.` : ''}</p><small>Based on entered estimates and current benches. Keep room for a repair that takes longer.</small></section>;
+  return (
+    <section className="outlook-panel">
+      <div className="outlook-heading">
+        <h3>A realistic rhythm.</h3>
+        <Clock3 size={16} />
+      </div>
+      <label>
+        Window from now
+        <select
+          aria-label="Planning window from now"
+          value={windowMinutes}
+          onChange={(e) => setWindowMinutes(Number(e.target.value))}
+        >
+          {[30, 60, 90, 120, 180].map((n) => (
+            <option value={n} key={n}>
+              {n} min
+            </option>
+          ))}
+        </select>
+      </label>
+      <div
+        className="outlook-bar"
+        role="img"
+        aria-label={`${fits} of ${total} queued repairs are estimated to fit within ${windowMinutes} minutes`}
+      >
+        <span style={{ width: `${total ? (fits / total) * 100 : 0}%` }} />
+      </div>
+      <p>
+        <strong>
+          {fits} of {total}
+        </strong>{' '}
+        queued repairs estimated to fit.
+        {blocked ? ` ${blocked} need review or an available skill.` : ''}
+      </p>
+      <small>
+        Based on entered estimates and current benches. Keep room for a repair that takes longer.
+      </small>
+    </section>
+  );
 }
