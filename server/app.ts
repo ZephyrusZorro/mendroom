@@ -2,6 +2,7 @@ import express, { type Request, type Response, type NextFunction } from 'express
 import helmet from 'helmet';
 import { ZodError } from 'zod';
 import { AppError, type Store } from './store.ts';
+import { sessionCsv } from './export.ts';
 
 export function createApp(store: Store, production = false) {
   const app = express();
@@ -20,6 +21,15 @@ export function createApp(store: Store, production = false) {
   app.get('/api/sessions', (_req, res) => res.json(store.listSessions()));
   app.post('/api/sessions', (req, res) => res.status(201).json(store.createSession(req.body)));
   app.post('/api/sample', (_req, res) => res.status(201).json(store.createSample()));
+  app.post('/api/restore', (req, res) => res.status(201).json(store.importSession(req.body)));
+  app.get('/api/sessions/:id/backup', (req, res) => {
+    const backup = store.exportSession(req.params.id);
+    res.attachment(`mendroom-${backup.session.date}.json`).json(backup);
+  });
+  app.get('/api/sessions/:id/report.csv', (req, res) => {
+    const data = store.readSession(req.params.id);
+    res.attachment(`mendroom-${data.session.date}.csv`).type('text/csv').send(sessionCsv(data));
+  });
   app.get('/api/sessions/:id', (req, res) => res.json(store.readSession(req.params.id)));
   app.post('/api/sessions/:id/volunteers', (req, res) => res.status(201).json(store.addVolunteer(req.params.id, req.body)));
   app.patch('/api/sessions/:id/volunteers/:volunteerId', (req, res) => res.json(store.editVolunteer(req.params.id, req.params.volunteerId, req.body)));

@@ -4,6 +4,7 @@ import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { actionInput, sessionInput, ticketInput, volunteerInput, volunteerEdit, type Activity, type Session, type SessionData, type SessionSummary, type Ticket, type Volunteer } from '../shared/model.ts';
 import { forecast } from '../shared/matching.ts';
+import { backupSchema, type Backup } from './backup.ts';
 
 export class AppError extends Error { constructor(public status: number, message: string) { super(message); } }
 const fail = (message: string, status = 409): never => { throw new AppError(status, message); };
@@ -171,5 +172,33 @@ export class Store {
     this.act(s.id, tickets[5].id, { action: 'assign', version: 1, volunteerId: robin.id });
     this.act(s.id, tickets[5].id, { action: 'complete', version: 2, outcome: 'repaired', note: 'Fitted a replacement slider. The zipper now closes smoothly.' });
     return s;
+  }
+  exportSession(id: string): Backup {
+    const { session, volunteers, tickets, activities } = this.readSession(id);
+    return { format: 'mendroom', version: 1, exportedAt: new Date().toISOString(), session, volunteers, tickets, activities };
+  }
+  importSession(input: unknown): Session {
+    const value = backupSchema.parse(input);
+    return this.transaction(() => {
+      const session: Session = { ...value.session, id: randomUUID(), title: `${value.session.title.slice(0, 89)} (restored)`, createdAt: new Date().toISOString() };
+      const mappings = new Map<string, string>();
+      for (const record of [...value.volunteers, ...value.tickets, ...value.activities]) mappings.set(record.id, randomUUID());
+      this.db.prepare('INSERT INTO sessions VALUES(?,?)').run(session.id, JSON.stringify(session));
+      for (const v of value.volunteers) {
+        const record = { ...v, id: mappings.get(v.id)!, sessionId: session.id, version: 1 };
+        this.db.prepare('INSERT INTO volunteers VALUES(?,?,?)').run(record.id, session.id, JSON.stringify(record));
+      }
+      for (const t of value.tickets) {
+        const record: Ticket = { ...t, id: mappings.get(t.id)!, sessionId: session.id, volunteerId: t.volunteerId ? mappings.get(t.volunteerId)! : null, version: 1 };
+        this.db.prepare('INSERT INTO tickets VALUES(?,?,?,?,?)').run(record.id, session.id, record.volunteerId, record.status, JSON.stringify(record));
+      }
+      // Backup activity is newest first; rows are stored oldest first.
+      for (const a of [...value.activities].reverse()) {
+        const record: Activity = { ...a, id: mappings.get(a.id)!, sessionId: session.id, ticketId: a.ticketId ? mappings.get(a.ticketId)! : null };
+        this.db.prepare('INSERT INTO activities VALUES(?,?,?)').run(record.id, session.id, JSON.stringify(record));
+      }
+      this.activity(session.id, null, 'Session restored as a separate copy. Original records were preserved.');
+      return session;
+    });
   }
 }

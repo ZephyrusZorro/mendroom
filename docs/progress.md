@@ -12,3 +12,5 @@ Plan: docs/plan.md. Spec: docs/product.md.
 - Milestone 2 complete: 6/6 tests and TypeScript passed; bda50f7 pushed and remote SHA verified.
 - Milestone 3: production build and 6/6 tests passed. Browser exercised creating an empty session, adding a skilled volunteer, checking in an item, assigning it, completing the outcome, reloading, and reading the persisted record in the journal. Test session and visitor are explicitly fictional.
 - Browser QA found that the narrow layout needs a session switcher; this is included in the enhancement pass. The core lifecycle is working.
+- Milestone 3 complete: 24c295b pushed after successful browser lifecycle verification.
+- Milestone 4: backup/restore and CSV tests ran red, then all 10 tests passed. Restores remap identities and preserve originals, validate cross-record invariants, and reject malformed payloads. CSV export escapes formulas and quotes multiline fields. Added responsive session switching and a human-controlled queue planning window. Production build passed.
