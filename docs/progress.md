@@ -9,3 +9,6 @@ Plan: docs/plan.md. Spec: docs/product.md.
 - Milestone 1 complete: repository created and first push confirmed at a17b352, before implementing the application.
 - Milestone 2: domain and HTTP tests ran red before backend implementation. Implemented transactional SQLite lifecycle, assignment invariants, revision conflicts and deterministic queue projections.
 - Test investigation: Node 24 fetch replaces custom Host headers on the wire (verified with a standalone HTTP echo server). The Host-rejection test now uses node:http to exercise the real header; no production workaround was needed.
+- Milestone 2 complete: 6/6 tests and TypeScript passed; bda50f7 pushed and remote SHA verified.
+- Milestone 3: production build and 6/6 tests passed. Browser exercised creating an empty session, adding a skilled volunteer, checking in an item, assigning it, completing the outcome, reloading, and reading the persisted record in the journal. Test session and visitor are explicitly fictional.
+- Browser QA found that the narrow layout needs a session switcher; this is included in the enhancement pass. The core lifecycle is working.
